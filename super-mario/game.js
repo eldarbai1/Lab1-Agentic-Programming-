@@ -1,5 +1,6 @@
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
+ctx.imageSmoothingEnabled = false;
 
 const W = canvas.width;
 const H = canvas.height;
@@ -9,35 +10,96 @@ const GRAVITY = 0.6;
 const MOVE_SPEED = 4;
 const JUMP_SPEED = -12;
 
-// Ground segments (with gaps), floating blocks, and a pipe.
+// Ground segments (with gaps), floating brick blocks, and a pipe.
 const platforms = [
-  { x: 0, y: 360, w: 800, h: 40 },
-  { x: 880, y: 360, w: 700, h: 40 },
-  { x: 1660, y: 360, w: 740, h: 40 },
-  { x: 300, y: 260, w: 120, h: 20 },
-  { x: 550, y: 200, w: 100, h: 20 },
-  { x: 650, y: 300, w: 50, h: 60 },
-  { x: 1000, y: 250, w: 150, h: 20 },
-  { x: 1300, y: 280, w: 100, h: 20 },
-  { x: 1800, y: 240, w: 120, h: 20 },
+  { type: "ground", x: 0, y: 360, w: 800, h: 40 },
+  { type: "ground", x: 880, y: 360, w: 700, h: 40 },
+  { type: "ground", x: 1660, y: 360, w: 740, h: 40 },
+  { type: "brick", x: 300, y: 260, w: 120, h: 20 },
+  { type: "brick", x: 550, y: 200, w: 100, h: 20 },
+  { type: "pipe", x: 650, y: 300, w: 50, h: 60 },
+  { type: "brick", x: 1000, y: 250, w: 150, h: 20 },
+  { type: "brick", x: 1300, y: 280, w: 100, h: 20 },
+  { type: "brick", x: 1800, y: 240, w: 120, h: 20 },
 ];
 
 const flag = { x: 2300, y: 110, w: 8, h: 250 };
 
-let player, goombas, coins, score, state;
+// Background scenery: [x, y] positions, drawn with parallax.
+const clouds = [[100, 60], [420, 100], [760, 50], [1100, 90], [1500, 60], [1850, 100]];
+const hills = [[60, 70], [500, 50], [950, 80], [1400, 60], [1800, 70]];
+const bushes = [[200], [980], [1450], [2000]];
+
+// --- Pixel-art sprites (each char is one pixel, "." is transparent) ---
+function makeSprite(rows, palette, scale) {
+  const c = document.createElement("canvas");
+  c.width = rows[0].length * scale;
+  c.height = rows.length * scale;
+  const g = c.getContext("2d");
+  rows.forEach((row, y) => {
+    [...row].forEach((ch, x) => {
+      if (ch === ".") return;
+      g.fillStyle = palette[ch];
+      g.fillRect(x * scale, y * scale, scale, scale);
+    });
+  });
+  return c;
+}
+
+const MARIO_PALETTE = { R: "#e52521", H: "#6b3a10", S: "#fcb878", B: "#2038ec", Y: "#ffd700" };
+const MARIO_TOP = [
+  "...RRRRR....",
+  "..RRRRRRRRR.",
+  "..HHHSSHS...",
+  ".HSHSSSHSSS.",
+  ".HSHHSSSHSSS",
+  ".HHSSSSHHHH.",
+  "...SSSSSSS..",
+  "..RRBRRB....",
+  ".RRRBRRBRRR.",
+  "RRRRBBBBRRRR",
+  "SSRBYBBYBRSS",
+  "SSSBBBBBBSSS",
+  "SSBBBBBBBBSS",
+];
+const marioStand = makeSprite([...MARIO_TOP, "..BBB..BBB..", ".HHH....HHH.", "HHHH....HHHH"], MARIO_PALETTE, 2);
+const marioWalk = makeSprite([...MARIO_TOP, "..BBBBBBB...", "..HHH.BBB...", ".HHHH..HHH.."], MARIO_PALETTE, 2);
+const marioJump = makeSprite([...MARIO_TOP, ".BBBB..BBBBH", "HHB......BHH", "HH.........."], MARIO_PALETTE, 2);
+
+const goombaSprite = makeSprite([
+  "......BBBB......",
+  ".....BBBBBB.....",
+  "....BBBBBBBB....",
+  "...BBBBBBBBBB...",
+  "..BKKBBBBBBKKB..",
+  ".BBBWKBBBBKWBBB.",
+  ".BBBWKKBBKKWBBB.",
+  "BBBBWWBBBBWWBBBB",
+  "BBBBBBBBBBBBBBBB",
+  ".BBBBBBBBBBBBBB.",
+  "...TTTTTTTTTT...",
+  "..TTTTTTTTTTTT..",
+  "..TTTTTTTTTTTT..",
+  ".KKK.TTTTTT.KKK.",
+  "KKKKK......KKKKK",
+  "KKKKK......KKKKK",
+], { B: "#a0522d", K: "#2b1700", W: "#fff", T: "#f0c890" }, 2);
+
+let player, goombas, coins, score, state, frame;
 
 function reset() {
-  player = { x: 50, y: 300, w: 28, h: 36, vx: 0, vy: 0, onGround: false };
+  player = { x: 50, y: 300, w: 24, h: 32, vx: 0, vy: 0, onGround: false, facing: 1 };
   goombas = [
-    { x: 450, y: 330, w: 30, h: 30, vx: -1, alive: true },
-    { x: 1200, y: 330, w: 30, h: 30, vx: -1, alive: true },
-    { x: 1900, y: 330, w: 30, h: 30, vx: 1, alive: true },
+    { x: 450, y: 328, w: 32, h: 32, vx: -1, alive: true },
+    { x: 1200, y: 328, w: 32, h: 32, vx: -1, alive: true },
+    { x: 1900, y: 328, w: 32, h: 32, vx: 1, alive: true },
   ];
   coins = [
     { x: 360, y: 230 }, { x: 600, y: 170 }, { x: 1075, y: 220 },
     { x: 1350, y: 250 }, { x: 1860, y: 210 },
   ].map(c => ({ ...c, r: 8, taken: false }));
   score = 0;
+  frame = 0;
   state = "playing"; // "playing" | "won" | "lost"
 }
 
@@ -66,6 +128,7 @@ function updatePlayer() {
   const jump = keys.Space || keys.ArrowUp || keys.KeyW;
 
   player.vx = (right ? MOVE_SPEED : 0) - (left ? MOVE_SPEED : 0);
+  if (player.vx !== 0) player.facing = Math.sign(player.vx);
   if (jump && player.onGround) player.vy = JUMP_SPEED;
   player.vy += GRAVITY;
 
@@ -133,6 +196,7 @@ function updateCoins() {
 }
 
 function update() {
+  frame++;
   if (state !== "playing") return;
   updatePlayer();
   updateGoombas();
@@ -140,57 +204,203 @@ function update() {
   if (overlaps(player, flag)) state = "won";
 }
 
-// --- Draw ---
-function draw() {
-  ctx.clearRect(0, 0, W, H);
-
-  const camX = Math.max(0, Math.min(player.x - W / 2, LEVEL_WIDTH - W));
-  ctx.save();
-  ctx.translate(-camX, 0);
-
-  ctx.fillStyle = "#c84c0c";
-  for (const p of platforms) ctx.fillRect(p.x, p.y, p.w, p.h);
-
+// --- Draw: background ---
+function drawCloud(x, y) {
   ctx.fillStyle = "#fff";
-  ctx.fillRect(flag.x, flag.y, flag.w, flag.h);
-  ctx.fillStyle = "#0a0";
   ctx.beginPath();
-  ctx.moveTo(flag.x, flag.y);
-  ctx.lineTo(flag.x - 40, flag.y + 20);
-  ctx.lineTo(flag.x, flag.y + 40);
+  ctx.arc(x, y, 18, 0, Math.PI * 2);
+  ctx.arc(x + 22, y - 10, 22, 0, Math.PI * 2);
+  ctx.arc(x + 46, y, 18, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillRect(x, y, 46, 18);
+}
+
+function drawHill(x, height) {
+  ctx.fillStyle = "#3aa83a";
+  ctx.beginPath();
+  ctx.ellipse(x + 80, 360, 80, height, 0, Math.PI, 0);
+  ctx.fill();
+  ctx.fillStyle = "#1e7a1e";
+  ctx.fillRect(x + 60, 360 - height + 25, 4, 10);
+  ctx.fillRect(x + 96, 360 - height + 25, 4, 10);
+}
+
+function drawBush(x) {
+  ctx.fillStyle = "#5cd65c";
+  ctx.beginPath();
+  ctx.arc(x, 360, 16, Math.PI, 0);
+  ctx.arc(x + 20, 356, 20, Math.PI, 0);
+  ctx.arc(x + 40, 360, 16, Math.PI, 0);
+  ctx.fill();
+}
+
+function drawBackground(camX) {
+  for (const [x, y] of clouds) drawCloud(x - camX * 0.3, y);
+  for (const [x, h] of hills) drawHill(x - camX * 0.6, h);
+}
+
+// --- Draw: level ---
+function drawGround(p) {
+  ctx.fillStyle = "#c84c0c";
+  ctx.fillRect(p.x, p.y, p.w, p.h);
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = 2;
+  for (let tx = p.x; tx < p.x + p.w; tx += 40) {
+    ctx.strokeRect(tx + 1, p.y + 1, 38, 38);
+    ctx.fillStyle = "#fcbcb0";
+    ctx.fillRect(tx + 2, p.y + 2, 36, 3);
+    ctx.fillRect(tx + 2, p.y + 2, 3, 36);
+  }
+}
+
+function drawBrick(p) {
+  ctx.fillStyle = "#c84c0c";
+  ctx.fillRect(p.x, p.y, p.w, p.h);
+  ctx.fillStyle = "#000";
+  ctx.fillRect(p.x, p.y + p.h / 2 - 1, p.w, 2);
+  ctx.fillRect(p.x, p.y + p.h - 2, p.w, 2);
+  for (let bx = p.x; bx < p.x + p.w; bx += 20) {
+    ctx.fillRect(bx, p.y, 2, p.h / 2);
+    ctx.fillRect(bx + 10, p.y + p.h / 2, 2, p.h / 2);
+  }
+  ctx.fillStyle = "#fcbcb0";
+  ctx.fillRect(p.x, p.y, p.w, 2);
+}
+
+function drawPipe(p) {
+  const lip = 14;
+  ctx.fillStyle = "#00a800";
+  ctx.fillRect(p.x + 4, p.y + lip, p.w - 8, p.h - lip);
+  ctx.fillRect(p.x, p.y, p.w, lip);
+  ctx.fillStyle = "#80f080";
+  ctx.fillRect(p.x + 10, p.y + lip, 5, p.h - lip);
+  ctx.fillRect(p.x + 6, p.y + 2, 5, lip - 4);
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(p.x + 4, p.y + lip, p.w - 8, p.h - lip);
+  ctx.strokeRect(p.x, p.y, p.w, lip);
+}
+
+function drawFlagAndCastle() {
+  // Pole with a ball on top and a waving flag.
+  ctx.fillStyle = "#9c9c9c";
+  ctx.fillRect(flag.x + 2, flag.y, 4, flag.h);
+  ctx.fillStyle = "#00a800";
+  ctx.beginPath();
+  ctx.arc(flag.x + 4, flag.y - 4, 6, 0, Math.PI * 2);
+  ctx.fill();
+  const wave = Math.sin(frame / 8) * 3;
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();
+  ctx.moveTo(flag.x + 2, flag.y + 6);
+  ctx.lineTo(flag.x - 36, flag.y + 20 + wave);
+  ctx.lineTo(flag.x + 2, flag.y + 36);
+  ctx.fill();
+  ctx.fillStyle = "#00a800";
+  ctx.beginPath();
+  ctx.arc(flag.x - 10, flag.y + 21, 5, 0, Math.PI * 2);
   ctx.fill();
 
+  // Small castle at the end.
+  const cx = 2330, cy = 280;
+  ctx.fillStyle = "#c84c0c";
+  ctx.fillRect(cx, cy, 64, 80);
+  for (let i = 0; i < 4; i++) ctx.fillRect(cx + i * 18, cy - 10, 10, 10);
+  ctx.fillStyle = "#000";
+  ctx.beginPath();
+  ctx.arc(cx + 32, cy + 60, 12, Math.PI, 0);
+  ctx.fill();
+  ctx.fillRect(cx + 20, cy + 60, 24, 20);
+  ctx.fillRect(cx + 12, cy + 18, 8, 12);
+  ctx.fillRect(cx + 44, cy + 18, 8, 12);
+}
+
+function drawCoin(c) {
+  const squash = Math.abs(Math.cos(frame / 12 + c.x));
+  const rx = Math.max(2, c.r * squash);
   ctx.fillStyle = "#ffd700";
-  for (const c of coins) {
-    if (c.taken) continue;
-    ctx.beginPath();
-    ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
-    ctx.fill();
+  ctx.strokeStyle = "#b8860b";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(c.x, c.y, rx, c.r + 2, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#fff8b0";
+  ctx.fillRect(c.x - 1, c.y - c.r + 3, 2, c.r * 2 - 6);
+}
+
+function drawGoomba(g) {
+  const flip = Math.floor(frame / 10) % 2 === 0;
+  ctx.save();
+  if (flip) {
+    ctx.translate(g.x + g.w, g.y);
+    ctx.scale(-1, 1);
+    ctx.drawImage(goombaSprite, 0, 0);
+  } else {
+    ctx.drawImage(goombaSprite, g.x, g.y);
   }
-
-  ctx.fillStyle = "#8b4513";
-  for (const g of goombas) if (g.alive) ctx.fillRect(g.x, g.y, g.w, g.h);
-
-  ctx.fillStyle = "#e52521";
-  ctx.fillRect(player.x, player.y, player.w, player.h);
-
   ctx.restore();
+}
 
-  ctx.fillStyle = "#fff";
-  ctx.font = "20px sans-serif";
+function drawPlayer() {
+  let sprite = marioStand;
+  if (!player.onGround) sprite = marioJump;
+  else if (player.vx !== 0 && Math.floor(frame / 6) % 2 === 0) sprite = marioWalk;
+
+  ctx.save();
+  if (player.facing < 0) {
+    ctx.translate(player.x + player.w, player.y);
+    ctx.scale(-1, 1);
+    ctx.drawImage(sprite, 0, 0);
+  } else {
+    ctx.drawImage(sprite, player.x, player.y);
+  }
+  ctx.restore();
+}
+
+function drawHUD() {
+  ctx.font = "bold 20px monospace";
   ctx.textAlign = "left";
-  ctx.fillText("Score: " + score, 10, 25);
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = "#000";
+  ctx.fillStyle = "#fff";
+  ctx.strokeText("SCORE " + String(score).padStart(5, "0"), 12, 28);
+  ctx.fillText("SCORE " + String(score).padStart(5, "0"), 12, 28);
 
   if (state !== "playing") {
     ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
     ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = "#fff";
     ctx.textAlign = "center";
-    ctx.font = "40px sans-serif";
-    ctx.fillText(state === "won" ? "You Win!" : "Game Over", W / 2, H / 2);
-    ctx.font = "20px sans-serif";
+    ctx.font = "bold 40px monospace";
+    ctx.fillText(state === "won" ? "YOU WIN!" : "GAME OVER", W / 2, H / 2);
+    ctx.font = "20px monospace";
     ctx.fillText("Press R to restart", W / 2, H / 2 + 35);
   }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  const camX = Math.max(0, Math.min(player.x - W / 2, LEVEL_WIDTH - W));
+  drawBackground(camX);
+
+  ctx.save();
+  ctx.translate(-camX, 0);
+
+  for (const [x] of bushes) drawBush(x);
+  drawFlagAndCastle();
+  for (const p of platforms) {
+    if (p.type === "ground") drawGround(p);
+    else if (p.type === "brick") drawBrick(p);
+    else drawPipe(p);
+  }
+  for (const c of coins) if (!c.taken) drawCoin(c);
+  for (const g of goombas) if (g.alive) drawGoomba(g);
+  drawPlayer();
+
+  ctx.restore();
+  drawHUD();
 }
 
 function loop() {
