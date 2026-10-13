@@ -2,13 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Super Mario (Basic)</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <h1>Super Mario</h1>
+  <div class="levels">
+    <span>Difficulty:</span>
+    <div id="levels"></div>
+  </div>
   <canvas id="game" width="800" height="400"></canvas>
-  <p>Arrow keys / A-D to move &middot; Space / Up / W to jump &middot; R to restart. Reach the flag!</p>
+  <p>Arrow keys / A-D to move &middot; Space / Up / W to jump &middot; R to restart &middot; 1-6 to pick difficulty &middot; N for the next level after winning. Reach the flag!</p>
   <script src="game.js"></script>
 </body>
 </html>

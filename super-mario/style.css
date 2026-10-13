@@ -12,3 +12,38 @@ canvas {
   background: #5c94fc;
   border: 4px solid #000;
 }
+
+.levels {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  margin: 0 16px 12px;
+}
+
+#levels {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+#levels button {
+  padding: 6px 12px;
+  border: 2px solid #000;
+  border-radius: 4px;
+  background: #fcbcb0;
+  color: #000;
+  font: bold 14px monospace;
+  cursor: pointer;
+}
+
+#levels button:hover {
+  background: #ffd700;
+}
+
+#levels button.active {
+  background: #e52521;
+  color: #fff;
+}

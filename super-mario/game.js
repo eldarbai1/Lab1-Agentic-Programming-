@@ -25,6 +25,52 @@ const platforms = [
 
 const flag = { x: 2300, y: 110, w: 8, h: 250 };
 
+// Difficulty levels, named by time complexity: more enemies (and faster) as it grows.
+// bricks = how many enemies also patrol the floating brick platforms.
+const LEVELS = [
+  { name: "O(1)",       enemies: 1,  speed: 1,   bricks: 0 },
+  { name: "O(log n)",   enemies: 3,  speed: 1,   bricks: 0 },
+  { name: "O(n)",       enemies: 6,  speed: 1.2, bricks: 1 },
+  { name: "O(n log n)", enemies: 10, speed: 1.4, bricks: 2 },
+  { name: "O(n²)",      enemies: 16, speed: 1.7, bricks: 4 },
+  { name: "O(2ⁿ)",      enemies: 24, speed: 2,   bricks: 5 },
+];
+let levelIndex = 2;
+
+// Ground stretches where enemies may spawn (away from the start, gaps, pipe and flag).
+const SPAWN_ZONES = [[250, 610], [900, 1540], [1690, 2250]];
+
+function spawnGoombas(level) {
+  const list = [];
+  const bricks = platforms.filter(p => p.type === "brick").slice(0, level.bricks);
+  for (const b of bricks) {
+    list.push({ x: b.x + b.w / 2 - 16, y: b.y - 32, w: 32, h: 32, vx: level.speed, alive: true });
+  }
+  // Spread the rest evenly along the ground zones.
+  const onGround = level.enemies - bricks.length;
+  const total = SPAWN_ZONES.reduce((s, [a, b]) => s + (b - a), 0);
+  for (let i = 0; i < onGround; i++) {
+    let d = ((i + 0.5) / onGround) * total;
+    for (const [a, b] of SPAWN_ZONES) {
+      if (d <= b - a) {
+        const dir = i % 2 === 0 ? -1 : 1;
+        list.push({ x: a + d, y: 328, w: 32, h: 32, vx: dir * level.speed, alive: true });
+        break;
+      }
+      d -= b - a;
+    }
+  }
+  return list;
+}
+
+function setLevel(i) {
+  levelIndex = Math.max(0, Math.min(i, LEVELS.length - 1));
+  document.querySelectorAll("#levels button").forEach((btn, j) => {
+    btn.classList.toggle("active", j === levelIndex);
+  });
+  reset();
+}
+
 // Background scenery: [x, y] positions, drawn with parallax.
 const clouds = [[100, 60], [420, 100], [760, 50], [1100, 90], [1500, 60], [1850, 100]];
 const hills = [[60, 70], [500, 50], [950, 80], [1400, 60], [1800, 70]];
@@ -89,11 +135,7 @@ let player, goombas, coins, score, state, frame;
 
 function reset() {
   player = { x: 50, y: 300, w: 24, h: 32, vx: 0, vy: 0, onGround: false, facing: 1 };
-  goombas = [
-    { x: 450, y: 328, w: 32, h: 32, vx: -1, alive: true },
-    { x: 1200, y: 328, w: 32, h: 32, vx: -1, alive: true },
-    { x: 1900, y: 328, w: 32, h: 32, vx: 1, alive: true },
-  ];
+  goombas = spawnGoombas(LEVELS[levelIndex]);
   coins = [
     { x: 360, y: 230 }, { x: 600, y: 170 }, { x: 1075, y: 220 },
     { x: 1350, y: 250 }, { x: 1860, y: 210 },
@@ -109,6 +151,22 @@ window.addEventListener("keydown", e => {
   keys[e.code] = true;
   if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code)) e.preventDefault();
   if (e.code === "KeyR") reset();
+  if (e.code === "KeyN" && state === "won") setLevel(levelIndex + 1);
+  const digit = /^Digit([1-6])$/.exec(e.code);
+  if (digit) setLevel(Number(digit[1]) - 1);
+});
+
+// Level picker buttons (built from LEVELS).
+const levelBar = document.getElementById("levels");
+LEVELS.forEach((lvl, i) => {
+  const btn = document.createElement("button");
+  btn.textContent = lvl.name;
+  btn.title = `${lvl.enemies} enem${lvl.enemies === 1 ? "y" : "ies"} (key ${i + 1})`;
+  btn.addEventListener("click", () => {
+    setLevel(i);
+    btn.blur(); // so Space jumps instead of re-clicking the button
+  });
+  levelBar.appendChild(btn);
 });
 window.addEventListener("keyup", e => { keys[e.code] = false; });
 
@@ -367,6 +425,13 @@ function drawHUD() {
   ctx.strokeText("SCORE " + String(score).padStart(5, "0"), 12, 28);
   ctx.fillText("SCORE " + String(score).padStart(5, "0"), 12, 28);
 
+  const level = LEVELS[levelIndex];
+  const alive = goombas.filter(g => g.alive).length;
+  const info = `LEVEL ${level.name}  ENEMIES ${alive}/${goombas.length}`;
+  ctx.textAlign = "right";
+  ctx.strokeText(info, W - 12, 28);
+  ctx.fillText(info, W - 12, 28);
+
   if (state !== "playing") {
     ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
     ctx.fillRect(0, 0, W, H);
@@ -375,7 +440,9 @@ function drawHUD() {
     ctx.font = "bold 40px monospace";
     ctx.fillText(state === "won" ? "YOU WIN!" : "GAME OVER", W / 2, H / 2);
     ctx.font = "20px monospace";
-    ctx.fillText("Press R to restart", W / 2, H / 2 + 35);
+    const hasNext = state === "won" && levelIndex < LEVELS.length - 1;
+    ctx.fillText(hasNext ? `Press N for ${LEVELS[levelIndex + 1].name} · R to replay` : "Press R to restart",
+      W / 2, H / 2 + 35);
   }
 }
 
@@ -409,5 +476,5 @@ function loop() {
   requestAnimationFrame(loop);
 }
 
-reset();
+setLevel(levelIndex);
 loop();
